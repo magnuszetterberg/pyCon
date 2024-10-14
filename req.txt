@@ -1,0 +1,10 @@
+pygame
+mss
+numpy
+opencv-python
+tensorflow
+pyautogui
+python-uinput
+evdev
+pygetwindow
+opencv-python
