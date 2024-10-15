@@ -8,3 +8,4 @@ python-uinput
 evdev
 pygetwindow
 opencv-python
+pillow

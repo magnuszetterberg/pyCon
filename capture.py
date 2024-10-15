@@ -1,55 +1,91 @@
 
+import os
 import subprocess
+import json
 import cv2
 import numpy as np
-import os
+from PIL import Image
+from io import BytesIO
+import time
 
-def capture_monitor(monitor_name):
-    # Define the command to run wf-recorder and pipe the output to GStreamer
-    wf_recorder_cmd = [
-        "wf-recorder",
-        "-o", monitor_name,
-        "-f", "/dev/stdout",
-        "-t", "raw"
-    ]
+# Set environment variable to use XCB plugin
+os.environ['QT_QPA_PLATFORM'] = 'xcb'
 
-    # Define the GStreamer pipeline to read from stdin and convert the video format
-    gst_pipeline = (
-        "fdsrc ! "
-        "rawvideoparse format=rgba width=1920 height=1080 framerate=30/1 ! "
-        "videoconvert ! "
-        "video/x-raw,format=BGR ! "
-        "appsink"
-    )
+def get_window_geometry(window_name):
+    try:
+        # Use hyprctl to get window information
+        hyprctl_command = ['hyprctl', 'clients', '-j']
+        result = subprocess.run(hyprctl_command, capture_output=True, text=True)
+        
+        if result.returncode != 0:
+            print(f"hyprctl command failed: {result.stderr}")
+            return None
+        
+        windows = json.loads(result.stdout)
+        for window in windows:
+            if window_name in window['title']:
+                x = window['at'][0]
+                y = window['at'][1]
+                width = window['size'][0]
+                height = window['size'][1]
+                geometry = f"{x},{y} {width}x{height}"
+                return geometry
+        
+        print(f"Window with name '{window_name}' not found.")
+        return None
+    except Exception as e:
+        print(f"An error occurred while fetching window geometry: {e}")
+        return None
 
-    # Open the video capture with the GStreamer pipeline
-    cap = cv2.VideoCapture(gst_pipeline, cv2.CAP_GSTREAMER)
+def capture_frame(geometry):
+    try:
+        # Use grim to capture the selected window
+        grim_command = ['grim', '-g', geometry, '-']
+        grim_output = subprocess.run(grim_command, capture_output=True)
+        
+        if grim_output.returncode != 0:
+            print(f"Grim capture failed: {grim_output.stderr}")
+            return None
+        
+        # Read the image from grim's output
+        image = Image.open(BytesIO(grim_output.stdout))
+        img_np = np.array(image)
+        frame = cv2.cvtColor(img_np, cv2.COLOR_RGB2BGR)
+        
+        return frame
+    except Exception as e:
+        print(f"An error occurred during frame capture: {e}")
+        return None
 
-    # Start the wf-recorder process
-    wf_recorder_process = subprocess.Popen(wf_recorder_cmd, stdout=subprocess.PIPE)
-
-    if not cap.isOpened():
-        print("Error: Could not open video capture")
-        wf_recorder_process.terminate()
+def main(window_name):
+    # Get geometry of the window to capture
+    geometry = get_window_geometry(window_name)
+    if not geometry:
         return
-
+    
     while True:
-        ret, frame = cap.read()
-        if not ret:
-            print("Error: Could not read frame")
+        # Capture the frame
+        frame = capture_frame(geometry)
+        if frame is None:
             break
 
-        # Display the frame using OpenCV
-        cv2.imshow("Monitor Capture", frame)
-
-        # Break the loop if the user presses the 'q' key
+        # Example analysis: Convert to grayscale and detect edges
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        edges = cv2.Canny(gray, 100, 200)
+        
+        # Display the original frame and the edge-detected frame
+        cv2.imshow('Captured Frame', frame)
+        #cv2.imshow('Edges', edges)
+        
+        # Break the loop if 'q' is pressed
         if cv2.waitKey(1) & 0xFF == ord('q'):
             break
+        
+        # Sleep for a short duration to control the frame rate
+        time.sleep(0.1)  # Adjust the sleep duration as needed
 
-    cap.release()
     cv2.destroyAllWindows()
-    wf_recorder_process.terminate()
 
-# Example usage
-monitor_name = "HDMI-A-1"  # Replace with the correct monitor identifier (e.g., HDMI-A-1, DP-1)
-capture_monitor(monitor_name)
+if __name__ == "__main__":
+    window_name = "DRL Simulator"  # Replace with the actual window name
+    main(window_name)
